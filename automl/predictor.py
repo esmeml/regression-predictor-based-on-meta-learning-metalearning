@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import label_binarize
 from sklearn.multiclass import OneVsRestClassifier
 from scipy import interp
+from itertools import cycle
 
 
 class prediction(object):
@@ -71,13 +72,13 @@ class prediction(object):
             models.update({'Lasso': perf})
             perf = self.modelRandomForestR(X_train, y_train, X_test, y_test)
             models.update({'RandomForestRegressor': perf})
-            print(models)
         elif (self.type == "classifier"):
             perf = self.modelSVR(X_train, y_train, X_test, y_test)
             models.update({'SVR': perf})
             perf = self.modelLogisticRegressor(
                 X_train, y_train, X_test, y_test)
             models.update({'LogisticRegressor': perf})
+            print(models)
         temp = 0
         for key in models:
             if models[key]['accurracy'] > temp:
@@ -85,7 +86,8 @@ class prediction(object):
                 final_model = models[key]
         print(final_model)
         if (self.type == "classifier"):
-            self.rocCurve(final_model, X_train, y_train, X_test, y_test)
+            self.rocCurve(final_model['model'],
+                          X_train, y_train, X_test, y_test)
 
     def evaluate(self, model, X_test, y_test):
         results = cross_val_score(
@@ -208,9 +210,9 @@ class prediction(object):
 
     def rocCurve(self, model, X_train, y_train, X_test, y_test):
         y_train1 = label_binarize(
-            y_train, range(0, y_train.nunique()))
+            y_train, list(range(0, self.dataset[self.target].nunique())))
         y_test1 = label_binarize(
-            y_test, range(0, y_train.nunique()))
+            y_test, list(range(0, self.dataset[self.target].nunique())))
         n_classes = y_train1.shape[1]
         classifier = OneVsRestClassifier(model)
         y_score = classifier.fit(
@@ -218,9 +220,13 @@ class prediction(object):
         fpr = dict()
         tpr = dict()
         roc_auc = dict()
-        for i in range(n_classes):
-            fpr[i], tpr[i], _ = roc_curve(y_test1[:, i], y_score[:, i])
-            roc_auc[i] = auc(fpr[i], tpr[i])
+        if (n_classes == 1):
+            fpr[0], tpr[0], _ = roc_curve(y_test1[:, 0], y_score)
+            roc_auc[0] = auc(fpr[0], tpr[0])
+        else:
+            for i in range(n_classes):
+                fpr[i], tpr[i], _ = roc_curve(y_test1[:, i], y_score[:, i])
+                roc_auc[i] = auc(fpr[i], tpr[i])
 
         # Compute micro-average ROC curve and ROC area
         fpr["micro"], tpr["micro"], _ = roc_curve(
@@ -245,6 +251,7 @@ class prediction(object):
 
         # Plot all ROC curves
         plt.figure()
+        lw = 2
         plt.plot(fpr["micro"], tpr["micro"],
                  label='micro-average ROC curve (area = {0:0.2f})'
                  ''.format(roc_auc["micro"]),
