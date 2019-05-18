@@ -13,4 +13,4 @@ cancer_ds = load_breast_cancer()
 cancer_df = pd.DataFrame(cancer_ds.data, columns=cancer_ds.feature_names)
 cancer_df['target'] = cancer_ds.target
 
-a = prediction(df, 'MEDV')
+a = prediction(cancer_df, 'target')

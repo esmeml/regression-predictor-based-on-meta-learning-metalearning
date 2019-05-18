@@ -14,6 +14,7 @@ from itertools import cycle
 from automl.gs_params import params
 import warnings
 warnings.filterwarnings('ignore')
+warnings.filterwarnings(action='ignore', category=FutureWarning)
 
 class prediction(object):
     def __init__(self, dataset, target, type_of_estimator=None):
@@ -40,6 +41,7 @@ class prediction(object):
         self.params = params()
         self.reduction()
         self.train(self.X,self.Y)
+        self.train(self.reducedDataset,self.Y,reduction=True)
 
     def reduction(self):
         numberOfComponent = len(
@@ -57,8 +59,7 @@ class prediction(object):
             X_projected = pca.transform(X_scaled)
             explained_variance = np.var(X_projected, axis=0)
             total_variance_explained = np.sum(explained_variance)/V
-            if (total_variance_explained > 90):
-                X_temp = pca.transform(X_scaled)
+            X_temp = pca.transform(X_scaled)
         self.reducedDataset = X_temp
 
     def clean(self):
@@ -80,16 +81,14 @@ class prediction(object):
                     self.dataset[column].fillna(method='bfill', inplace=True)
                     self.dataset[column].fillna(method='ffill', inplace=True)
 
-    def train(self, X, Y):
+    def train(self, X, Y, reduction=False):
         models = {}
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, Y, test_size=0.20, random_state=42)
+        X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.20, random_state=42)
         if (self.type == "continuous"):
-            
             perf = self.modelLasso(X_train, y_train, X_test, y_test)
             models.update({'Lasso': perf})
-            #perf = self.modelRandomForestR(X_train, y_train, X_test, y_test)
-            #models.update({'RandomForestRegressor': perf})
+            perf = self.modelRandomForestRegressor(X_train, y_train, X_test, y_test)
+            models.update({'RandomForestRegressor': perf})
             perf = self.modelElasticNet(X_train, y_train, X_test, y_test)
             models.update({'ElasticNet': perf})
             perf = self.modelLinearSVR(X_train, y_train, X_test, y_test)
@@ -123,15 +122,6 @@ class prediction(object):
                 if models[key]['accurracy'] > temp and models[key]!=final_model1 and models[key]!=final_model2:
                     temp = models[key]['accurracy']
                     final_model3 = models[key]
-            if (final_model1['name'] != 'RandomForestClassifier'):
-                self.rocCurve(final_model1['model'],
-                          X_train, y_train, X_test, y_test)
-            if (final_model2['name'] != 'RandomForestClassifier'):
-                self.rocCurve(final_model2['model'],
-                          X_train, y_train, X_test, y_test)
-            if (final_model3['name'] != 'RandomForestClassifier'):
-                self.rocCurve(final_model3['model'],
-                          X_train, y_train, X_test, y_test)
         if (self.type == "continuous"):
             temp = 0
             for key in models:
@@ -148,16 +138,72 @@ class prediction(object):
                 if models[key]['accurracy']['accurracy'] > temp and models[key]!=final_model1 and models[key]!=final_model2:
                     temp = models[key]['accurracy']['accurracy']
                     final_model3 = models[key]
-        self.result = {'First' : final_model1 , 'Second': final_model2, 'Third' : final_model3}
-        
-        print('first model:')
-        print(final_model1)
-        print('second model:')
-        print(final_model2)
-        print('third model:')
-        print(final_model3)
-        print('use .result to access models')
+        if(reduction):
+            final_model1.update({'Dimension Reduction' : True})
+            final_model2.update({'Dimension Reduction' : True})
+            final_model3.update({'Dimension Reduction': True})
+            self.result.update({'Fourth' : final_model1,'Fifth' : final_model2, 'Sixth':final_model3})
+            if(self.type == "continuous"):
+                temp = 0
+                for key in self.result:
+                    if self.result[key]['accurracy']['accurracy'] > temp:
+                        temp = self.result[key]['accurracy']['accurracy']
+                        f1 = self.result[key]
+                temp = 0
+                for key in self.result:
+                    if self.result[key]['accurracy']['accurracy'] > temp and self.result[key]!=f1:
+                        temp = self.result[key]['accurracy']['accurracy']
+                        f2 = self.result[key]
+                temp = 0
+                for key in self.result:
+                    if self.result[key]['accurracy']['accurracy'] > temp and self.result[key]!=f1 and self.result[key]!=f2:
+                        temp = self.result[key]['accurracy']['accurracy']
+                        f3 = self.result[key]
+                print('first model:')
+                print(f1)
+                print('second model:')
+                print(f2)
+                print('third model:')
+                print(f3)
+                print('use .result to access models')
 
+            else:
+                temp = 0
+                for key in self.result:
+                    if self.result[key]['accurracy'] > temp:
+                        temp = self.result[key]['accurracy']
+                        f1 = self.result[key]
+                temp = 0
+                for key in self.result:
+                    if self.result[key]['accurracy'] > temp and self.result[key]!=f1:
+                        temp = self.result[key]['accurracy']
+                        f2 = self.result[key]
+                temp = 0
+                for key in self.result:
+                    if self.result[key]['accurracy'] > temp and self.result[key]!=f1 and self.result[key]!=f2:
+                        temp = self.result[key]['accurracy']
+                        f3 = self.result[key]
+                print('first model:')
+                print(f1)
+                print('second model:')
+                print(f2)
+                print('third model:')
+                print(f3)
+                print('use .result to access models')
+                if (f1['name'] != 'RandomForestClassifier'):
+                    self.rocCurve(f1['model'],final_model1['name'],
+                            X_train, y_train, X_test, y_test)
+                if (f2['name'] != 'RandomForestClassifier'):
+                    self.rocCurve(f2['model'],f2['name'],
+                            X_train, y_train, X_test, y_test)
+                if (f3['name'] != 'RandomForestClassifier'):
+                    self.rocCurve(f3['model'],f3['name'],
+                            X_train, y_train, X_test, y_test)
+            self.result = {'First' : f1 , 'Second': f2, 'Third' : f3}
+        else:
+            self.result = {'First' : final_model1 , 'Second': final_model2, 'Third' : final_model3}
+        
+        
     def evaluate(self, model, X_test, y_test):
         results = cross_val_score(
             model, X_test, y_test, cv=KFold(n_splits=10), n_jobs=1)
@@ -183,79 +229,11 @@ class prediction(object):
         performance = {'model': bestmodel, 'accurracy': result , 'name': 'lasso'}
         return performance
 
-    def modelRandomForestR(self, X_train, y_train, X_test, y_test):
-        rf = RandomForestRegressor(random_state=42)
-        # Number of trees in random forest
-        n_estimators = [int(x)
-                        for x in np.linspace(start=200, stop=2000, num=10)]
-        # Number of features to consider at every split
-        max_features = ['auto', 'sqrt']
-        # Maximum number of levels in tree
-        max_depth = [int(x) for x in np.linspace(10, 110, num=11)]
-        max_depth.append(None)
-        # Minimum number of samples required to split a node
-        min_samples_split = [2, 5, 10]
-        #    Minimum number of samples required at each leaf node
-        min_samples_leaf = [1, 2, 4]
-        # Method of selecting samples for training each tree
-        bootstrap = [True, False]
-        # Create the random grid
-        random_grid = {'n_estimators': n_estimators,
-                       'max_features': max_features,
-                       'max_depth': max_depth,
-                       'min_samples_split': min_samples_split,
-                       'min_samples_leaf': min_samples_leaf,
-                       'bootstrap': bootstrap}
-        rf_random = RandomizedSearchCV(
-            estimator=rf, param_distributions=random_grid, n_iter=100, cv=3, verbose=2, random_state=42, n_jobs=-1)
-        # Fit the random search model
-        rf_random.fit(X_train, y_train)
-        base_model = RandomForestRegressor(n_estimators=10, random_state=42)
-        base_model.fit(X_train, y_train)
-        base_accuracy = self.evaluate(base_model, X_test, y_test)
-        best_random = rf_random.best_estimator_
-        random_accuracy = self.evaluate(best_random, X_test, y_test)
-        best_random = rf_random.best_params_
-        if (random_accuracy < base_accuracy):
-            return {'model': base_model, 'accurracy': base_accuracy}
-        else:
-            max_depth = list(filter(lambda x: x > 0, [int(x) for x in np.linspace(
-                best_random['max_depth'], best_random['max_depth'] + 40, num=4)]))
-            min_samples_leaf = list(filter(lambda x: x > 0, [
-                                    best_random['min_samples_leaf']-1, best_random['min_samples_leaf'], best_random['min_samples_leaf']+1]))
-
-            min_samples_split = list(filter(lambda x: x > 0, [
-                                     best_random['min_samples_split']-2, best_random['min_samples_split'], best_random['min_samples_split']+2]))
-
-            n_estimators = list(filter(lambda x: x > 0, [int(x) for x in np.linspace(
-                best_random['n_estimators']-200, best_random['max_depth'] + 200, num=5)]))
-
-            param_grid = {
-                'bootstrap': best_random['bootstrap'],
-                'max_depth': max_depth,
-                'max_features': [2, 3],
-                'min_samples_leaf': min_samples_leaf,
-                'min_samples_split': min_samples_split,
-                'n_estimators': n_estimators
-            }
-            rf = RandomForestRegressor(random_state=42)
-            # Instantiate the grid search model
-            grid_search = GridSearchCV(
-                estimator=rf, param_grid=param_grid, cv=3, n_jobs=-1, verbose=2, return_train_score=True)
-            grid_search.fit(X_train, y_train)
-            best_grid = grid_search.best_estimator_
-            grid_accuracy = self.evaluate(best_grid, X_test, y_test)
-            if (grid_accuracy > random_accuracy):
-                return {'model': best_grid, 'accurracy': grid_accuracy,'name': 'RandomForestRegressor'}
-            else:
-                return {'model': random_grid, 'accurracy': random_accuracy,'name': 'RandomForestRegressor'}
-
-
     def modelLogisticRegressor(self, X_train, y_train, X_test, y_test):
         dual = [True, False]
         max_iter = [100, 110, 120, 130, 140]
         param_grid = dict(dual=dual, max_iter=max_iter)
-        lr = LogisticRegression(penalty='l2')
+        lr = LogisticRegression(penalty='l2',solver='liblinear')
         grid = GridSearchCV(
             estimator=lr, param_grid=param_grid, cv=3, n_jobs=-1)
         grid.fit(X_train, y_train)
@@ -263,7 +241,7 @@ class prediction(object):
         grid_accuracy = self.evaluate(best_grid, X_test, y_test)
         return {'model': best_grid, 'accurracy': grid_accuracy,'name': 'LogisticRegressor'}
 
-    def rocCurve(self, model, X_train, y_train, X_test, y_test):
+    def rocCurve(self, model,name, X_train, y_train, X_test, y_test):
         y_train1 = label_binarize(
             y_train, list(range(0, self.dataset[self.target].nunique())))
         y_test1 = label_binarize(
@@ -328,8 +306,7 @@ class prediction(object):
         plt.ylim([0.0, 1.05])
         plt.xlabel('False Positive Rate')
         plt.ylabel('True Positive Rate')
-        plt.title(
-            'Some extension of Receiver operating characteristic to multi-class')
+        plt.title(name)
         plt.legend(loc="lower right")
         plt.show()
 
@@ -383,7 +360,7 @@ class prediction(object):
     def modelLinearSVR(self, X_train, y_train, X_test, y_test):
         lr = LinearSVR()
         grid = GridSearchCV(
-            estimator=lr, param_grid=self.params['LinearSVR'], cv=3, n_jobs=-1)
+            estimator=lr, param_grid=self.params['LinearSVR'], cv=3, n_jobs=1)
         grid.fit(X_train, y_train)
         best_grid = grid.best_estimator_
         grid_accuracy = self.evaluate(best_grid, X_test, y_test)
@@ -392,8 +369,17 @@ class prediction(object):
     def modelLinearSVC(self, X_train, y_train, X_test, y_test):
         lr = LinearSVC()
         grid = GridSearchCV(
-            estimator=lr, param_grid=self.params['LinearSVC'], cv=3, n_jobs=-1)
+            estimator=lr, param_grid=self.params['LinearSVC'], cv=3, n_jobs=1)
         grid.fit(X_train, y_train)
         best_grid = grid.best_estimator_
         grid_accuracy = self.evaluate(best_grid, X_test, y_test)
-        return {'model': best_grid, 'accurracy': grid_accuracy,'name' :'LinearS'}
+        return {'model': best_grid, 'accurracy': grid_accuracy,'name' :'LinearSVC'}
+    
+    def modelRandomForestRegressor(self, X_train, y_train, X_test, y_test):
+        lr = RandomForestRegressor()
+        grid = GridSearchCV(
+            estimator=lr, param_grid=self.params['RandomForestRegressor'], cv=3, n_jobs=1)
+        grid.fit(X_train, y_train)
+        best_grid = grid.best_estimator_
+        grid_accuracy = self.evaluate(best_grid, X_test, y_test)
+        return {'model': best_grid, 'accurracy': grid_accuracy,'name' :'RandomForestRegressor'}
