@@ -1,17 +1,19 @@
 import numpy as np
 import pandas as pd
 from sklearn import decomposition, preprocessing
-from sklearn.svm import SVR
+from sklearn.svm import LinearSVR, LinearSVC
 from sklearn.model_selection import GridSearchCV, train_test_split, cross_val_score, KFold, RandomizedSearchCV
-from sklearn.linear_model import LinearRegression, Lasso, LogisticRegression
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import roc_curve, auc
+from sklearn.linear_model import LinearRegression, Lasso, LogisticRegression, ElasticNet
+from sklearn.ensemble import RandomForestRegressor, AdaBoostRegressor, RandomForestClassifier
+from sklearn.metrics import roc_curve, auc, mean_squared_error
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import label_binarize
 from sklearn.multiclass import OneVsRestClassifier
 from scipy import interp
 from itertools import cycle
-
+from automl.gs_params import params
+import warnings
+warnings.filterwarnings('ignore')
 
 class prediction(object):
     def __init__(self, dataset, target, type_of_estimator=None):
@@ -21,33 +23,48 @@ class prediction(object):
             else:
                 self.type = "classifier"
         else:
-            self.type = type_of_estimator
+            if (type_of_estimator == "continuous" or type_of_estimator =="classifier"):
+                self.type = type_of_estimator
+            else:
+                print('Invalid value for "type_of_estimator". Please pass in either "continuous" or "classifier". You passed in: ' + type_of_estimator)
         self.dataset = dataset
+        self.result = {}
+        self.reducedDataset = None
+        self.withoutOutliers = None
         self.clean()
         self.target = target
+        self.grid_S = params()
+        self.Outliers()
         self.Y = dataset[target].values
         self.X = dataset.loc[:, dataset.columns != target].values
+        self.params = params()
+        self.reduction()
+        self.train(self.X,self.Y)
 
     def reduction(self):
         numberOfComponent = len(
             self.dataset.loc[:, self.dataset.columns != self.target].columns)
-        total_variance_explained = 90
-        X_temp = self.X
+        total_variance_explained = 0
+        X_temp = None
+        dimension = 1
         std_scale = preprocessing.StandardScaler().fit(self.X)
         X_scaled = std_scale.transform(self.X)
         V = np.sum(np.var(X_scaled, axis=0))
-        while(total_variance_explained > 88):
-            numberOfComponent = numberOfComponent-1
-            pca = decomposition.PCA(n_components=numberOfComponent)
+        while(total_variance_explained < 90 and dimension < numberOfComponent):
+            dimension = dimension + 1
+            pca = decomposition.PCA(n_components=dimension)
             pca.fit(X_scaled)
             X_projected = pca.transform(X_scaled)
             explained_variance = np.var(X_projected, axis=0)
             total_variance_explained = np.sum(explained_variance)/V
-            if (total_variance_explained > 88):
+            if (total_variance_explained > 90):
                 X_temp = pca.transform(X_scaled)
-        self.X = X_temp
+        self.reducedDataset = X_temp
 
     def clean(self):
+        number_of_Nan = self.dataset.isnull().sum().sum()
+        pourcentage_of_Nan = (number_of_Nan/self.dataset.count().sum())*100
+        print('NaNs represent ' + str(pourcentage_of_Nan) + ' pourcentage of dataset')
         for column in self.dataset.columns.values:
             # Replace NaNs with the median or mode of the column depending on the column type
             try:
@@ -63,36 +80,91 @@ class prediction(object):
                     self.dataset[column].fillna(method='bfill', inplace=True)
                     self.dataset[column].fillna(method='ffill', inplace=True)
 
-    def train(self):
+    def train(self, X, Y):
         models = {}
         X_train, X_test, y_train, y_test = train_test_split(
-            self.X, self.Y, test_size=0.20, random_state=42)
+            X, Y, test_size=0.20, random_state=42)
         if (self.type == "continuous"):
+            
             perf = self.modelLasso(X_train, y_train, X_test, y_test)
             models.update({'Lasso': perf})
-            perf = self.modelRandomForestR(X_train, y_train, X_test, y_test)
-            models.update({'RandomForestRegressor': perf})
+            #perf = self.modelRandomForestR(X_train, y_train, X_test, y_test)
+            #models.update({'RandomForestRegressor': perf})
+            perf = self.modelElasticNet(X_train, y_train, X_test, y_test)
+            models.update({'ElasticNet': perf})
+            perf = self.modelLinearSVR(X_train, y_train, X_test, y_test)
+            models.update({'LinearSVR': perf})
+            perf = self.modelLinearRegression(X_train, y_train, X_test, y_test)
+            models.update({'LinearRegression': perf})
+            perf = self.modelAdaBoostRegressor(X_train, y_train, X_test, y_test)
+            models.update({'AdaBoostRegressor': perf})
         elif (self.type == "classifier"):
-            perf = self.modelSVR(X_train, y_train, X_test, y_test)
-            models.update({'SVR': perf})
+            perf = self.modelLinearSVC(X_train, y_train, X_test, y_test)
+            models.update({'SVC': perf})
+            perf = self.modelRandomForestClassifier(X_train, y_train, X_test, y_test)
+            models.update({'RandomForestClassifier': perf})
             perf = self.modelLogisticRegressor(
                 X_train, y_train, X_test, y_test)
             models.update({'LogisticRegressor': perf})
-            print(models)
-        temp = 0
-        for key in models:
-            if models[key]['accurracy'] > temp:
-                temp = models[key]['accurracy']
-                final_model = models[key]
-        print(final_model)
+
         if (self.type == "classifier"):
-            self.rocCurve(final_model['model'],
+            temp = 0
+            for key in models:
+                if models[key]['accurracy'] > temp:
+                    temp = models[key]['accurracy']
+                    final_model1 = models[key]
+            temp = 0
+            for key in models:
+                if models[key]['accurracy'] > temp and models[key]!=final_model1:
+                    temp = models[key]['accurracy']
+                    final_model2 = models[key]
+            temp = 0
+            for key in models:
+                if models[key]['accurracy'] > temp and models[key]!=final_model1 and models[key]!=final_model2:
+                    temp = models[key]['accurracy']
+                    final_model3 = models[key]
+            if (final_model1['name'] != 'RandomForestClassifier'):
+                self.rocCurve(final_model1['model'],
                           X_train, y_train, X_test, y_test)
+            if (final_model2['name'] != 'RandomForestClassifier'):
+                self.rocCurve(final_model2['model'],
+                          X_train, y_train, X_test, y_test)
+            if (final_model3['name'] != 'RandomForestClassifier'):
+                self.rocCurve(final_model3['model'],
+                          X_train, y_train, X_test, y_test)
+        if (self.type == "continuous"):
+            temp = 0
+            for key in models:
+                if models[key]['accurracy']['accurracy'] > temp:
+                    temp = models[key]['accurracy']['accurracy']
+                    final_model1 = models[key]
+            temp = 0
+            for key in models:
+                if models[key]['accurracy']['accurracy'] > temp and models[key]!=final_model1:
+                    temp = models[key]['accurracy']['accurracy']
+                    final_model2 = models[key]
+            temp = 0
+            for key in models:
+                if models[key]['accurracy']['accurracy'] > temp and models[key]!=final_model1 and models[key]!=final_model2:
+                    temp = models[key]['accurracy']['accurracy']
+                    final_model3 = models[key]
+        self.result = {'First' : final_model1 , 'Second': final_model2, 'Third' : final_model3}
+        
+        print('first model:')
+        print(final_model1)
+        print('second model:')
+        print(final_model2)
+        print('third model:')
+        print(final_model3)
+        print('use .result to access models')
 
     def evaluate(self, model, X_test, y_test):
         results = cross_val_score(
-            model, X_test, y_test, cv=KFold(n_splits=5), n_jobs=1)
+            model, X_test, y_test, cv=KFold(n_splits=10), n_jobs=1)
         result = np.mean(list(filter(lambda x: x > 0, results)))
+        if (self.type=="continuous"):
+            mse_test = mean_squared_error(y_test, model.predict(X_test))
+            result = {'accurracy': result, 'rmse': np.sqrt(mse_test)}
         return result
 
     def modelLasso(self, X_train, y_train, X_test, y_test):
@@ -108,7 +180,7 @@ class prediction(object):
                           alpha=best_params['alpha'])
         bestmodel.fit(X_train, y_train)
         result = self.evaluate(bestmodel, X_test, y_test)
-        performance = {'model': bestmodel, 'accurracy': result}
+        performance = {'model': bestmodel, 'accurracy': result , 'name': 'lasso'}
         return performance
 
     def modelRandomForestR(self, X_train, y_train, X_test, y_test):
@@ -174,27 +246,10 @@ class prediction(object):
             best_grid = grid_search.best_estimator_
             grid_accuracy = self.evaluate(best_grid, X_test, y_test)
             if (grid_accuracy > random_accuracy):
-                return {'model': best_grid, 'accurracy': grid_accuracy}
+                return {'model': best_grid, 'accurracy': grid_accuracy,'name': 'RandomForestRegressor'}
             else:
-                return {'model': random_grid, 'accurracy': random_accuracy}
+                return {'model': random_grid, 'accurracy': random_accuracy,'name': 'RandomForestRegressor'}
 
-    def modelSVR(self, X_train, y_train, X_test, y_test):
-        gsc = GridSearchCV(
-            estimator=SVR(kernel='rbf'),
-            param_grid={
-                'C': [0.1, 1, 100, 1000],
-                'epsilon': [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10],
-                'gamma': [0.0001, 0.001, 0.005, 0.1, 1, 3, 5]
-            },
-            cv=5, scoring='neg_mean_squared_error', verbose=0, n_jobs=-1)
-        grid_result = gsc.fit(X_train, y_train)
-        best_params = grid_result.best_params_
-        best_svr = SVR(kernel='rbf', C=best_params["C"], epsilon=best_params["epsilon"], gamma=best_params["gamma"],
-                       coef0=0.1, shrinking=True, tol=0.001, cache_size=200, verbose=False, max_iter=-1)
-        best_svr.fit(X_train, y_train)
-        result = self.evaluate(best_svr, X_test, y_test)
-        performance = {'model': best_svr, 'accurracy': result}
-        return performance
 
     def modelLogisticRegressor(self, X_train, y_train, X_test, y_test):
         dual = [True, False]
@@ -206,7 +261,7 @@ class prediction(object):
         grid.fit(X_train, y_train)
         best_grid = grid.best_estimator_
         grid_accuracy = self.evaluate(best_grid, X_test, y_test)
-        return {'model': best_grid, 'accurracy': grid_accuracy}
+        return {'model': best_grid, 'accurracy': grid_accuracy,'name': 'LogisticRegressor'}
 
     def rocCurve(self, model, X_train, y_train, X_test, y_test):
         y_train1 = label_binarize(
@@ -277,3 +332,68 @@ class prediction(object):
             'Some extension of Receiver operating characteristic to multi-class')
         plt.legend(loc="lower right")
         plt.show()
+
+    def Outliers(self):
+        Q1 = self.dataset.quantile(0.25)
+        Q3 = self.dataset.quantile(0.75)
+        IQR = Q3 - Q1
+        self.withoutOutliers = self.dataset[~((self.dataset < (
+            Q1 - 1.5 * IQR)) | (self.dataset > (Q3 + 1.5 * IQR))).any(axis=1)]
+        pourcentage_of_outliers = (self.withoutOutliers.count()[
+                                   self.withoutOutliers.columns[0]]/self.dataset.count()[self.dataset.columns[0]])*100
+        print('there is ' + str(pourcentage_of_outliers) +
+              ' pourcetage of rows with outliers')
+
+    def modelRandomForestClassifier(self, X_train, y_train, X_test, y_test):
+        lr = RandomForestClassifier()
+        grid = GridSearchCV(
+            estimator=lr, param_grid=self.params['RandomForestClassifier'], cv=3, n_jobs=-1)
+        grid.fit(X_train, y_train)
+        best_grid = grid.best_estimator_
+        grid_accuracy = self.evaluate(best_grid, X_test, y_test)
+        return {'model': best_grid, 'accurracy': grid_accuracy, 'name' : 'RandomForestClassifier'}
+
+    def modelLinearRegression(self, X_train, y_train, X_test, y_test):
+        lr = LinearRegression()
+        grid = GridSearchCV(
+            estimator=lr, param_grid=self.params['LinearRegression'], cv=3, n_jobs=-1)
+        grid.fit(X_train, y_train)
+        best_grid = grid.best_estimator_
+        grid_accuracy = self.evaluate(best_grid, X_test, y_test)
+        return {'model': best_grid, 'accurracy': grid_accuracy, 'name':LinearRegression}
+
+    def modelAdaBoostRegressor(self, X_train, y_train, X_test, y_test):
+        lr = AdaBoostRegressor()
+        grid = GridSearchCV(
+            estimator=lr, param_grid=self.params['AdaBoostRegressor'], cv=3, n_jobs=-1)
+        grid.fit(X_train, y_train)
+        best_grid = grid.best_estimator_
+        grid_accuracy = self.evaluate(best_grid, X_test, y_test)
+        return {'model': best_grid, 'accurracy': grid_accuracy,'name' :'AdaBoostRegressor'}
+
+    def modelElasticNet(self, X_train, y_train, X_test, y_test):
+        lr = ElasticNet()
+        grid = GridSearchCV(
+            estimator=lr, param_grid= self.params['ElasticNet'], cv=3, n_jobs=-1)
+        grid.fit(X_train, y_train)
+        best_grid = grid.best_estimator_
+        grid_accuracy = self.evaluate(best_grid, X_test, y_test)
+        return {'model': best_grid, 'accurracy': grid_accuracy,'name' :'ElasticNet'}
+
+    def modelLinearSVR(self, X_train, y_train, X_test, y_test):
+        lr = LinearSVR()
+        grid = GridSearchCV(
+            estimator=lr, param_grid=self.params['LinearSVR'], cv=3, n_jobs=-1)
+        grid.fit(X_train, y_train)
+        best_grid = grid.best_estimator_
+        grid_accuracy = self.evaluate(best_grid, X_test, y_test)
+        return {'model': best_grid, 'accurracy': grid_accuracy,'name' :'LinearSVR'}
+
+    def modelLinearSVC(self, X_train, y_train, X_test, y_test):
+        lr = LinearSVC()
+        grid = GridSearchCV(
+            estimator=lr, param_grid=self.params['LinearSVC'], cv=3, n_jobs=-1)
+        grid.fit(X_train, y_train)
+        best_grid = grid.best_estimator_
+        grid_accuracy = self.evaluate(best_grid, X_test, y_test)
+        return {'model': best_grid, 'accurracy': grid_accuracy,'name' :'LinearS'}
